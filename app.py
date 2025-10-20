@@ -3,6 +3,12 @@ import feedparser
 from datetime import datetime
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from deep_translator import GoogleTranslator
+from bs4 import BeautifulSoup
+
+# ก่อนแปล ให้ล้าง HTML
+def clean_html(raw_html):
+    soup = BeautifulSoup(raw_html, "html.parser")
+    return soup.get_text()
 
 # ---------- CONFIG ----------
 RSS_FEEDS = [
@@ -30,16 +36,12 @@ def get_news():
     articles = []
     for url in RSS_FEEDS:
         try:
-            feed = feedparser.parse(url)
-            for e in feed.entries[:10]:
-                articles.append({
-                    "title": e.get("title", ""),
-                    "summary": e.get("summary", ""),
-                    "link": e.get("link", ""),
-                    "published": e.get("published", "")
-                })
+            summary_text = clean_html(art["summary"])
+            summary_th = GoogleTranslator(source='auto', target='th').translate(summary_text)
+                
         except Exception:
-            continue
+            summary_th = clean_html(art["summary"])
+	st.write(f"→ {summary_th}")
     return articles
 
 articles = get_news()
