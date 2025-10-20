@@ -1,0 +1,5 @@
+git add .
+git commit -m "Initial commit: SmartMarket Dashboard"
+git branch -M main
+git remote add origin https://github.com/devilhaxor-ui/smartmarket-dashboard.git
+git push -u origin main
