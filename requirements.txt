@@ -3,4 +3,7 @@ feedparser
 vaderSentiment
 deep-translator
 beautifulsoup4
-
+yfinance
+pytz
+pandas
+requests
