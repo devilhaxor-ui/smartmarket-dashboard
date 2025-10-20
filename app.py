@@ -1,8 +1,8 @@
 import streamlit as st
 import feedparser
 from datetime import datetime
-from googletrans import Translator
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from deep_translator import GoogleTranslator
 
 # ---------- CONFIG ----------
 RSS_FEEDS = [
@@ -18,8 +18,6 @@ ASSETS = {
 }
 
 analyzer = SentimentIntensityAnalyzer()
-translator = Translator()
-
 st.set_page_config(page_title="SmartMarket Daily Dashboard", layout="centered")
 
 st.title("🌞 SmartMarket Daily Dashboard")
@@ -83,7 +81,7 @@ for asset_name, data in results.items():
     for art in data["articles"][:3]:
         st.markdown(f"📰 [{art['title']}]({art['link']})")
         try:
-            summary_th = translator.translate(art["summary"], src='en', dest='th').text
+            summary_th = GoogleTranslator(source='auto', target='th').translate(art["summary"])
         except Exception:
             summary_th = art["summary"]
         st.write(f"→ {summary_th}")
@@ -93,4 +91,4 @@ st.subheader("📊 แนวโน้มตลาดโดยรวมวัน�
 for asset_name, data in results.items():
     st.write(f"{asset_name} = **{data['trend']}**")
 
-st.caption("🧠 วิเคราะห์ด้วย VADER sentiment + แปลอัตโนมัติจาก Google Translate + ข่าว RSS")
+st.caption("🧠 วิเคราะห์ด้วย VADER sentiment + แปลอัตโนมัติจาก Google Translator + ข่าว RSS")
