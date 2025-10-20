@@ -36,12 +36,24 @@ def get_news():
     articles = []
     for url in RSS_FEEDS:
         try:
-            summary_text = clean_html(art["summary"])
-            summary_th = GoogleTranslator(source='auto', target='th').translate(summary_text)
+            feed = feedparser.parse(url)
+            for entry in feed.entries:
+                # ทำความสะอาด HTML และแปลข่าว
+                summary_text = clean_html(entry.get("summary", ""))
+                try:
+                    summary_th = GoogleTranslator(source='auto', target='th').translate(summary_text)
+                except Exception:
+                    summary_th = summary_text
                 
-        except Exception:
-            summary_th = clean_html(art["summary"])
-	st.write(f"→ {summary_th}")
+                articles.append({
+                    "title": entry.title,
+                    "link": entry.link,
+                    "summary": summary_th,
+                    "published": entry.get("published", "")
+                })
+        except Exception as e:
+            st.error(f"Error fetching feed {url}: {str(e)}")
+    
     return articles
 
 articles = get_news()
@@ -57,6 +69,7 @@ for asset_name, keywords in ASSETS.items():
             vs = analyzer.polarity_scores(a["title"] + " " + a["summary"])
             sentiment_scores.append(vs["compound"])
             relevant.append(a)
+    
     if sentiment_scores:
         avg_sent = sum(sentiment_scores) / len(sentiment_scores)
         if avg_sent > 0.1:
@@ -80,13 +93,9 @@ for asset_name, data in results.items():
     st.subheader(f"🔹 {asset_name}")
     st.write(f"แนวโน้มข่าว: {data['tone']} (sentiment = {data['sentiment']:.2f})")
     st.write("**สรุปข่าว:**")
-    for art in data["articles"][:3]:
+    for art in data["articles"][:3]:  # แสดงแค่ 3 ข่าวล่าสุด
         st.markdown(f"📰 [{art['title']}]({art['link']})")
-        try:
-            summary_th = GoogleTranslator(source='auto', target='th').translate(art["summary"])
-        except Exception:
-            summary_th = art["summary"]
-        st.write(f"→ {summary_th}")
+        st.write(f"→ {art['summary']}")
     st.markdown("---")
 
 st.subheader("📊 แนวโน้มตลาดโดยรวมวันนี้:")
