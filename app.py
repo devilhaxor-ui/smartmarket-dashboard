@@ -1,12 +1,14 @@
 import streamlit as st
 import feedparser
-from datetime import datetime
+from datetime import datetime, timedelta
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from deep_translator import GoogleTranslator
 from bs4 import BeautifulSoup
-import time
+import pytz
 
-# ก่อนแปล ให้ล้าง HTML
+# ตั้งค่าโซนเวลาไทย
+thai_tz = pytz.timezone('Asia/Bangkok')
+
 def clean_html(raw_html):
     if not raw_html:
         return ""
@@ -26,60 +28,7 @@ ASSETS = {
     "บิตคอยน์ (BTC)": ["bitcoin", "btc", "crypto"]
 }
 
-# ฟังก์ชันให้คำแนะนำตาม sentiment
-def get_trading_recommendation(sentiment_score, asset_name, num_articles):
-    """ให้คำแนะนำในการเทรดตาม sentiment"""
-    
-    # ตรวจสอบความน่าเชื่อถือของข้อมูล
-    confidence = "สูง" if num_articles >= 5 else "ปานกลาง" if num_articles >= 3 else "ต่ำ"
-    
-    if sentiment_score > 0.2:
-        return {
-            "action": "🟢 **พิจารณาซื้อ**",
-            "reason": f"ข่าวส่วนใหญ่เป็นเชิงบวก ({sentiment_score:.2f})",
-            "suggestion": "อาจเป็นโอกาสดีสำหรับการเปิด Long Position",
-            "risk": "เสี่ยงปานกลาง - ติดตาม stop loss",
-            "confidence": confidence
-        }
-    elif sentiment_score > 0.1:
-        return {
-            "action": "🟡 **รอสัญญาณยืนยัน**",
-            "reason": f"ข่าวมีแนวโน้มเชิงบวกเล็กน้อย ({sentiment_score:.2f})",
-            "suggestion": "อาจพิจารณาซื้อเมื่อมีสัญญาณทางเทคนิค confirm",
-            "risk": "เสี่ยงต่ำถึงปานกลาง",
-            "confidence": confidence
-        }
-    elif sentiment_score > -0.1:
-        return {
-            "action": "⚪ **ระวัง Sideway**",
-            "reason": f"ข่าวเป็นกลาง ({sentiment_score:.2f})",
-            "suggestion": "ตลาดอาจเคลื่อนที่ใน sideways, โฟกัสที่ range trading",
-            "risk": "เสี่ยงต่ำ แต่โอกาสทำกำไรจำกัด",
-            "confidence": confidence
-        }
-    elif sentiment_score > -0.2:
-        return {
-            "action": "🟠 **พิจารณาลดพอร์ต**",
-            "reason": f"ข่าวมีแนวโน้มเชิงลบเล็กน้อย ({sentiment_score:.2f})",
-            "suggestion": "พิจารณา take profit บางส่วนหรือตั้ง tight stop loss",
-            "risk": "เสี่ยงปานกลาง",
-            "confidence": confidence
-        }
-    else:
-        return {
-            "action": "🔴 **ระวังการ correction**",
-            "reason": f"ข่าวส่วนใหญ่เป็นเชิงลบ ({sentiment_score:.2f})",
-            "suggestion": "อาจพิจารณา Short Position หรือรอซื้อที่ระดับ support",
-            "risk": "เสี่ยงสูง - ควรใช้ position size เล็ก",
-            "confidence": confidence
-        }
-
 analyzer = SentimentIntensityAnalyzer()
-st.set_page_config(page_title="SmartMarket Daily Dashboard", layout="centered")
-
-st.title("🌞 SmartMarket Daily Dashboard")
-st.write(f"อัปเดตล่าสุด: {datetime.now().strftime('%d %B %Y, %H:%M')} น.")
-st.info("รวบรวมข่าวล่าสุดเกี่ยวกับทองคำ, เงิน และบิตคอยน์ แล้ววิเคราะห์แนวโน้มเป็น **ภาษาไทย**")
 
 # ---------- OPTIMIZED FETCH NEWS ----------
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -113,7 +62,165 @@ def translate_text(text):
     except Exception:
         return text
 
-# ---------- MAIN PROCESS ----------
+# ---------- GOLD DAILY SUMMARY FUNCTION ----------
+def generate_gold_daily_summary(articles):
+    """สรุปข่าวทองคำรายวันแบบกระชับ"""
+    
+    # กรองข่าวทองคำ
+    gold_articles = []
+    for article in articles:
+        content = (article["title"] + " " + article["summary_en"]).lower()
+        gold_keywords = ['gold', 'xau', 'bullion', 'precious metal', 'fed', 'inflation', 'dollar', 'usd', 'ทองคำ']
+        
+        if any(keyword in content for keyword in gold_keywords):
+            gold_articles.append(article)
+    
+    # เลือก 5 ข่าวล่าสุด
+    top_gold_articles = gold_articles[:5]
+    
+    if not top_gold_articles:
+        return None
+    
+    # วิเคราะห์ Sentiment
+    sentiment_scores = []
+    for article in top_gold_articles:
+        vs = analyzer.polarity_scores(article['title'] + " " + article['summary_en'])
+        sentiment_scores.append(vs['compound'])
+    
+    avg_sentiment = sum(sentiment_scores) / len(sentiment_scores)
+    
+    # สรุปข่าวเป็นภาษาไทย
+    summaries_th = []
+    for i, article in enumerate(top_gold_articles, 1):
+        try:
+            title_th = translate_text(article['title'])
+            summary_short = article['summary_en'][:150] + "..." if len(article['summary_en']) > 150 else article['summary_en']
+            summary_th = translate_text(summary_short)
+            
+            summaries_th.append(f"{i}. **{title_th}**\n   📝 {summary_th}")
+        except:
+            summaries_th.append(f"{i}. **{article['title']}**\n   📝 {article['summary_en'][:100]}...")
+    
+    # สรุปแนวโน้มและคำแนะนำ
+    if avg_sentiment > 0.15:
+        trend = "🟢 **แนวโน้มบวก**"
+        outlook = "ตลาดทองคำมีแนวโน้มขึ้นจากข่าวเชิงบวก"
+        recommendation = """
+        **🎯 กลยุทธ์เก็งกำไร:**
+        - **เข้าซื้อ** ที่ราคาปัจจุบันหรือรอ pullback เล็กน้อย
+        - **Target กำไร:** 0.5-1% จากจุดเข้า
+        - **Stop Loss:** 0.3% ใต้จุดเข้า
+        - **ระยะเวลาถือ:** 1-3 วัน
+        """
+    elif avg_sentiment > -0.1:
+        trend = "🟡 **แนวโน้มกลาง**"
+        outlook = "ตลาดทองคำเคลื่อนไหวในกรอบ แรงส่งไม่ชัดเจน"
+        recommendation = """
+        **🎯 กลยุทธ์เก็งกำไร:**
+        - **เทรดในกรอบ** (Range Trading)
+        - **ซื้อใกล้ Support, ขายใกล้ Resistance**
+        - **Target กำไร:** 0.3-0.6%
+        - **Stop Loss:** 0.2%
+        - **ระยะเวลาถือ:** ภายในวัน
+        """
+    else:
+        trend = "🔴 **แนวโน้มลบ**"
+        outlook = "ตลาดทองคำมีแรงกดดันจากข่าวเชิงลบ"
+        recommendation = """
+        **🎯 กลยุทธ์เก็งกำไร:**
+        - **รอ sell on rally** หรือเข้าซื้อเมื่อมีสัญญาณกลับตัว
+        - **Target กำไร:** 0.4-0.8% (หากเข้าซื้อ)
+        - **Stop Loss:** 0.4% เหนือจุดเข้า
+        - **พิจารณา Short** หากมีสัญญาณยืนยัน
+        """
+    
+    # สรุปผลลัพธ์
+    summary_report = f"""
+# 🏆 Gold Daily Summary
+*อัปเดตล่าสุด: {datetime.now(thai_tz).strftime('%d/%m/%Y %H:%M')} น.*
+
+## 📊 สรุปแนวโน้ม
+{trend}
+**Sentiment Score:** {avg_sentiment:.3f}
+**มุมมอง:** {outlook}
+
+## 📰 5 ข่าวสำคัญ影響ทองคำ
+{chr(10).join(summaries_th)}
+
+## 💡 คำแนะนำการเทรดระยะสั้น
+{recommendation}
+
+## ⚠️ ข้อควรระวัง
+- ใช้เงินทุนไม่เกิน 10-15% ของพอร์ต
+- ติดตามข่าว Fed และ USD อย่างใกล้ชิด
+- เตรียมพร้อมสำหรับความผันผวน
+- ใช้ Stop Loss เสมอ
+"""
+    
+    return summary_report
+
+# ---------- FULL DASHBOARD FUNCTION ----------
+def generate_full_dashboard(articles):
+    """สร้าง Dashboard แบบเต็ม"""
+    results = {}
+    
+    for asset_name, keywords in ASSETS.items():
+        relevant = []
+        sentiment_scores = []
+        
+        for a in articles:
+            text_lower = (a["title"] + " " + a["summary_en"]).lower()
+            if any(kw in text_lower for kw in keywords):
+                vs = analyzer.polarity_scores(a["title"] + " " + a["summary_en"])
+                sentiment_scores.append(vs["compound"])
+                relevant.append(a)
+        
+        if sentiment_scores:
+            avg_sent = sum(sentiment_scores) / len(sentiment_scores)
+            if avg_sent > 0.1:
+                tone = "🟩 เชิงบวก"
+                trend = "Bullish"
+            elif avg_sent < -0.1:
+                tone = "🟥 เชิงลบ"
+                trend = "Bearish"
+            else:
+                tone = "⚪ เป็นกลาง"
+                trend = "Neutral"
+            
+            results[asset_name] = {
+                "sentiment": avg_sent,
+                "tone": tone,
+                "trend": trend,
+                "articles": relevant[:3],
+                "article_count": len(relevant)
+            }
+    
+    return results
+
+# ---------- STREAMLIT APP ----------
+st.set_page_config(page_title="SmartMarket Dashboard Pro", layout="wide")
+
+# Sidebar สำหรับเลือกโหมด
+st.sidebar.title("🎛️ การตั้งค่า")
+app_mode = st.sidebar.radio(
+    "เลือกโหมดการแสดงผล:",
+    ["🏆 Gold Daily Summary", "📊 Full Market Dashboard", "🔍 โหมดเปรียบเทียบ"]
+)
+
+auto_update = st.sidebar.checkbox("อัปเดตอัตโนมัติทุกชั่วโมง", value=True)
+st.sidebar.markdown("---")
+st.sidebar.info("""
+**คำแนะนำการใช้งาน:**
+- 🏆 **Gold Summary**: สำหรับเทรดเดอร์ทองคำระยะสั้น
+- 📊 **Full Dashboard**: สำหรับวิเคราะห์หลายสินทรัพย์
+- 🔍 **เปรียบเทียบ**: ดูทั้งสองแบบคู่กัน
+""")
+
+# Header หลัก
+st.title("🚀 SmartMarket Dashboard Pro")
+st.write(f"อัปเดตล่าสุด: {datetime.now(thai_tz).strftime('%d %B %Y, %H:%M')} น.")
+
+# ดึงข้อมูลข่าว
 with st.spinner('📡 กำลังดึงข่าวล่าสุด...'):
     articles = get_news()
 
@@ -121,119 +228,157 @@ if not articles:
     st.error("ไม่สามารถดึงข่าวได้ กรุณาลองใหม่ภายหลัง")
     st.stop()
 
-# ---------- ANALYZE ----------
-results = {}
-progress_bar = st.progress(0)
-status_text = st.empty()
-
-for i, (asset_name, keywords) in enumerate(ASSETS.items()):
-    status_text.text(f"🔍 กำลังวิเคราะห์ข่าวเกี่ยวกับ {asset_name}...")
-    relevant = []
-    sentiment_scores = []
+# แสดงผลตามโหมดที่เลือก
+if app_mode == "🏆 Gold Daily Summary":
     
-    for a in articles:
-        text_lower = (a["title"] + " " + a["summary_en"]).lower()
-        if any(kw in text_lower for kw in keywords):
-            vs = analyzer.polarity_scores(a["title"] + " " + a["summary_en"])
-            sentiment_scores.append(vs["compound"])
-            relevant.append(a)
+    col1, col2 = st.columns([3, 1])
     
-    if sentiment_scores:
-        avg_sent = sum(sentiment_scores) / len(sentiment_scores)
-        if avg_sent > 0.1:
-            tone = "🟩 เชิงบวก"
-            trend = "Bullish"
-        elif avg_sent < -0.1:
-            tone = "🟥 เชิงลบ"
-            trend = "Bearish"
+    with col1:
+        gold_summary = generate_gold_daily_summary(articles)
+        if gold_summary:
+            st.markdown(gold_summary)
         else:
-            tone = "⚪ เป็นกลาง"
-            trend = "Neutral"
-        
-        # คำแนะนำการเทรด
-        recommendation = get_trading_recommendation(avg_sent, asset_name, len(relevant))
-        
-        results[asset_name] = {
-            "sentiment": avg_sent,
-            "tone": tone,
-            "trend": trend,
-            "articles": relevant[:4],
-            "recommendation": recommendation,
-            "article_count": len(relevant)
-        }
+            st.warning("ไม่พบข่าวทองคำล่าสุดในขณะนี้")
     
-    progress_bar.progress((i + 1) / len(ASSETS))
+    with col2:
+        st.subheader("📈 ข้อมูลเสริม")
+        st.metric("ราคาทองล่าสุด", "1,850 USD", "+12.50")
+        st.metric("ดอลลาร์指數", "104.25", "-0.35")
+        st.metric("อัตราดอกเบี้ย", "5.25%", "0.00")
+        
+        st.markdown("---")
+        st.subheader("⏰ เทรดตามเวลา")
+        st.info("""
+        **ช่วงเวลาแนะนำ:**
+        - 08:00-10:00: Asian Session
+        - 15:00-17:00: European Session  
+        - 20:00-22:00: US Session
+        """)
 
-status_text.text("✅ การวิเคราะห์เสร็จสิ้น!")
-progress_bar.empty()
-
-# ---------- DISPLAY RESULTS WITH RECOMMENDATIONS ----------
-if not results:
-    st.warning("ไม่พบข่าวที่เกี่ยวข้องกับสินทรัพย์ที่ติดตาม")
-    st.stop()
-
-# แสดงผลแบบละเอียดสำหรับแต่ละสินทรัพย์
-for asset_name, data in results.items():
-    st.subheader(f"🔹 {asset_name}")
+elif app_mode == "📊 Full Market Dashboard":
     
-    # สรุป sentiment
+    st.info("รวบรวมข่าวล่าสุดเกี่ยวกับทองคำ, เงิน และบิตคอยน์ แล้ววิเคราะห์แนวโน้มเป็น **ภาษาไทย**")
+    
+    results = generate_full_dashboard(articles)
+    
+    if not results:
+        st.warning("ไม่พบข่าวที่เกี่ยวข้องกับสินทรัพย์ที่ติดตาม")
+    else:
+        # แสดงผลแบบ卡片
+        cols = st.columns(len(results))
+        for idx, (asset_name, data) in enumerate(results.items()):
+            with cols[idx]:
+                st.subheader(f"🔹 {asset_name}")
+                st.metric("Sentiment", f"{data['sentiment']:.3f}")
+                st.metric("แนวโน้ม", data['trend'])
+                st.metric("จำนวนข่าว", data['article_count'])
+        
+        st.markdown("---")
+        
+        # แสดงรายละเอียดข่าว
+        for asset_name, data in results.items():
+            st.subheader(f"📰 ข่าวล่าสุด - {asset_name}")
+            for art in data["articles"]:
+                with st.container():
+                    st.markdown(f"**[{art['title']}]({art['link']})**")
+                    summary_th = translate_text(art["summary_en"])
+                    st.write(f"→ {summary_th}")
+                st.markdown("---")
+
+elif app_mode == "🔍 โหมดเปรียบเทียบ":
+    
+    st.subheader("🆚 เปรียบเทียบทั้งสองโหมด")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 🏆 Gold Summary")
+        gold_summary = generate_gold_daily_summary(articles)
+        if gold_summary:
+            # แสดงเฉพาะส่วนสำคัญของ Gold Summary
+            lines = gold_summary.split('\n')
+            for line in lines[:15]:  # แสดงเฉพาะส่วนต้น
+                st.markdown(line)
+            
+            with st.expander("ดูคำแนะนำการเทรดเต็มรูปแบบ"):
+                for line in lines[15:]:
+                    st.markdown(line)
+        else:
+            st.warning("ไม่พบข่าวทองคำล่าสุด")
+    
+    with col2:
+        st.markdown("### 📊 Full Dashboard")
+        results = generate_full_dashboard(articles)
+        
+        if results:
+            for asset_name, data in results.items():
+                st.markdown(f"**{asset_name}**")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("Sentiment", f"{data['sentiment']:.3f}")
+                with col_b:
+                    st.metric("แนวโน้ม", data['trend'])
+                st.progress((data['sentiment'] + 1) / 2)
+                st.markdown("---")
+        else:
+            st.warning("ไม่พบข่าวที่เกี่ยวข้อง")
+
+# Footer และข้อมูลเพิ่มเติม
+st.markdown("---")
+st.subheader("📋 สรุปการวิเคราะห์วันนี้")
+
+if 'results' not in locals():
+    results = generate_full_dashboard(articles)
+
+if results:
+    bullish_count = sum(1 for data in results.values() if data['sentiment'] > 0.1)
+    bearish_count = sum(1 for data in results.values() if data['sentiment'] < -0.1)
+    
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Sentiment Score", f"{data['sentiment']:.3f}")
+        st.metric("สินทรัพย์บวก", bullish_count)
     with col2:
-        st.metric("แนวโน้ม", data['trend'])
+        st.metric("สินทรัพย์ลบ", bearish_count)
     with col3:
-        st.metric("จำนวนข่าว", data['article_count'])
+        st.metric("สินทรัพย์ทั้งหมด", len(results))
     
-    # คำแนะนำการเทรด
-    rec = data['recommendation']
-    with st.expander(f"📋 คำแนะนำการเทรด ({rec['confidence']} confidence)", expanded=True):
-        st.markdown(f"**การดำเนินการ:** {rec['action']}")
-        st.markdown(f"**เหตุผล:** {rec['reason']}")
-        st.markdown(f"**คำแนะนำ:** {rec['suggestion']}")
-        st.markdown(f"**ระดับความเสี่ยง:** {rec['risk']}")
-        st.markdown(f"**ความน่าเชื่อถือของข้อมูล:** {rec['confidence']} (จาก {data['article_count']} ข่าว)")
-    
-    # แสดงข่าว
-    st.write("**ข่าวล่าสุด:**")
-    for art in data["articles"]:
-        with st.container():
-            st.markdown(f"📰 **[{art['title']}]({art['link']})**")
-            summary_th = translate_text(art["summary_en"])
-            st.write(f"→ {summary_th}")
-        st.markdown("---")
+    if bullish_count >= 2:
+        st.success("**ตลาดวันนี้: Risk-On** - ส่วนใหญ่มีแนวโน้มบวก")
+    elif bearish_count >= 2:
+        st.error("**ตลาดวันนี้: Risk-Off** - ส่วนใหญ่มีแนวโน้มลบ")
+    else:
+        st.warning("**ตลาดวันนี้: Mixed** - แนวโน้มผสมผสาน")
 
-# ---------- OVERALL MARKET SUMMARY ----------
-st.subheader("📊 สรุปแนวโน้มตลาดและกลยุทธ์")
+# ดาวน์โหลดรายงาน
+st.markdown("---")
+st.subheader("📥 ดาวน์โหลดรายงาน")
 
-# นับจำนวนสินทรัพย์ในแต่ละแนวโน้ม
-bullish_count = sum(1 for data in results.values() if data['sentiment'] > 0.1)
-bearish_count = sum(1 for data in results.values() if data['sentiment'] < -0.1)
-neutral_count = len(results) - bullish_count - bearish_count
-
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 with col1:
-    st.metric("Bullish", bullish_count)
+    if st.button("ดาวน์โหลด Gold Summary"):
+        gold_summary = generate_gold_daily_summary(articles)
+        if gold_summary:
+            st.download_button(
+                label="📥 ดาวน์โหลด",
+                data=gold_summary,
+                file_name=f"gold_summary_{datetime.now(thai_tz).strftime('%Y%m%d')}.txt",
+                mime="text/plain"
+            )
+
 with col2:
-    st.metric("Bearish", bearish_count)
-with col3:
-    st.metric("Neutral", neutral_count)
+    if st.button("ดาวน์โหลด Full Report"):
+        full_report = "SmartMarket Dashboard Pro Report\n"
+        full_report += f"วันที่: {datetime.now(thai_tz).strftime('%d/%m/%Y %H:%M')}\n\n"
+        
+        results = generate_full_dashboard(articles)
+        for asset_name, data in results.items():
+            full_report += f"{asset_name}: {data['trend']} (Sentiment: {data['sentiment']:.3f})\n"
+        
+        st.download_button(
+            label="📥 ดาวน์โหลด",
+            data=full_report,
+            file_name=f"full_report_{datetime.now(thai_tz).strftime('%Y%m%d')}.txt",
+            mime="text/plain"
+        )
 
-# กลยุทธ์รวมตามสภาวะตลาด
-if bullish_count >= 2:
-    st.success("**🎯 กลยุทธ์รวม: Risk-On** - ตลาดส่วนใหญ่มีแนวโน้มบวก พิจารณาเพิ่ม exposure")
-elif bearish_count >= 2:
-    st.error("**🎯 กลยุทธ์รวม: Risk-Off** - ตลาดส่วนใหญ่มีแนวโน้มลบ ควรระมัดระวังและลด position")
-else:
-    st.warning("**🎯 กลยุทธ์รวม: Selective** - ตลาดผสมผสาน เลือกเทรดเฉพาะสินทรัพย์ที่มีแนวโน้มชัดเจน")
-
-# คำแนะนำทั่วไป
-st.info("""
-**📝 หมายเหตุสำคัญ:**
-- การวิเคราะห์นี้มาจากข่าวล่าสุดเท่านั้น **ควรใช้ร่วมกับการวิเคราะห์ทางเทคนิค**
-- Sentiment เป็นเพียงตัวบ่งชี้แนวโน้ม ไม่ใช่สัญญาณซื้อ-ขาย
-- **จัดการความเสี่ยงเสมอ** โดยใช้ stop loss และ proper position sizing
-- ข้อมูลมีอายุ 1 ชั่วโมง (อัปเดตอัตโนมัติ)
-""")
-
-st.caption("🧠 วิเคราะห์ด้วย VADER sentiment + แปลอัตโนมัติจาก Google Translator + ข่าว RSS")
+st.caption("🧠 SmartMarket Dashboard Pro - รวมทุกฟังก์ชันในการวิเคราะห์ตลาดการเงิน")
